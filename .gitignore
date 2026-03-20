@@ -4,3 +4,4 @@ coverage/
 *.log
 *.tmp
 *.out
+cmd/server/__debug_bin.exe*
