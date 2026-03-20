@@ -1,0 +1,11 @@
+.git
+.gitignore
+.vscode
+**/*.log
+**/*.tmp
+**/*.out
+bin
+dist
+coverage
+agent-transcripts
+terminals
