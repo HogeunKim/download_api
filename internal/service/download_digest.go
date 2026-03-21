@@ -150,6 +150,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 				muxFPS := chooseMuxInputFPS(frameCount, requestDurationSec, sourceFPS)
 				containerPath := buildOutputContainerPathByChannelName(req.TargetFolder, channelNameByIndex[ch])
 				if runtimeCfg.Debug {
+					fmt.Printf("[container match] channel=%d path=%s\n", ch, containerPath)
 					fmt.Printf("[container fps] ch=%d frameCount=%d durationSec=%.3f muxInputFPS=%s\n", ch, frameCount, requestDurationSec, formatFFmpegFPS(muxFPS))
 				}
 				if err := TranscodeRawBytesToContainerWithMap(channelRaw, containerPath, containerFormat, muxFPS, ch, runtimeCfg.Debug); err != nil {

@@ -67,8 +67,8 @@ func FetchRecordListFromTarget(ctx context.Context, deviceIP string) (model.Reco
 			Index:     it.Index,
 			IsDriving: it.IsDriving,
 			Channels:  channelFlagsToIndexes(it.ModelChFlags),
-			STime:     it.STime,
-			ETime:     it.ETime,
+			STime:     formatRecordListTime(it.STime),
+			ETime:     formatRecordListTime(it.ETime),
 			Completed: it.Completed,
 		})
 	}
@@ -95,4 +95,17 @@ func channelFlagsToIndexes(flags string) string {
 		}
 	}
 	return strings.Join(channels, ",")
+}
+
+func formatRecordListTime(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	parsed, err := time.ParseInLocation("2006/01/02 15:04:05", trimmed, time.Local)
+	if err != nil {
+		return trimmed
+	}
+	return parsed.Format("20060102T150405")
 }
