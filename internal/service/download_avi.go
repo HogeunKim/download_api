@@ -57,11 +57,11 @@ var audioFourCCSet = map[uint32]struct{}{
 }
 
 type h264Frame struct {
-	data      []byte
-	keyFrame  bool
-	timestamp time.Time
-	format    string
-	fps       uint32
+	data        []byte
+	keyFrame    bool
+	timestamp   time.Time
+	format      string
+	fps         uint32
 	channelMask uint8
 }
 
@@ -218,11 +218,11 @@ func extractH264Frames(stream []byte, debug bool, targetFolder string) ([]h264Fr
 				end = frameTime
 			}
 			frames = append(frames, h264Frame{
-				data:      slices.Clone(payload),
-				keyFrame:  frameType == 0,
-				timestamp: frameTime,
-				format:    sanitizeFourCC(tag),
-				fps:       nFPS,
+				data:        slices.Clone(payload),
+				keyFrame:    frameType == 0,
+				timestamp:   frameTime,
+				format:      sanitizeFourCC(tag),
+				fps:         nFPS,
 				channelMask: nChannelRaw,
 			})
 			videoFrameCount++
@@ -468,6 +468,7 @@ func isSingleBitMask(v uint8) bool {
 
 func TranscodeRawToContainer(rawPath, outputPath, format string, fps float64, debug bool) error {
 	fpsArg := formatFFmpegFPS(fps)
+	setTSArg := fmt.Sprintf("setts=pts=N/(%s*TB):dts=N/(%s*TB)", fpsArg, fpsArg)
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return fmt.Errorf("failed to transcode: ffmpeg not found in PATH")
@@ -479,9 +480,9 @@ func TranscodeRawToContainer(rawPath, outputPath, format string, fps float64, de
 	var cmd *exec.Cmd
 	switch strings.ToLower(format) {
 	case "avi":
-		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", rawPath, "-map", "0:v:0", "-c:v", "copy", outputPath)
+		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", rawPath, "-map", "0:v:0", "-c:v", "copy", "-bsf:v", setTSArg, "-fps_mode", "cfr", "-r", fpsArg, outputPath)
 	case "mp4":
-		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", rawPath, "-map", "0:v:0", "-c:v", "copy", "-movflags", "+faststart", outputPath)
+		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", rawPath, "-map", "0:v:0", "-c:v", "copy", "-bsf:v", setTSArg, "-fps_mode", "cfr", "-r", fpsArg, "-movflags", "+faststart", outputPath)
 	default:
 		return fmt.Errorf("unsupported container format: %s", format)
 	}
@@ -530,13 +531,14 @@ func TranscodeRawBytesToContainerWithMap(rawVideo []byte, outputPath, format str
 	}
 
 	fpsArg := formatFFmpegFPS(fps)
+	setTSArg := fmt.Sprintf("setts=pts=N/(%s*TB):dts=N/(%s*TB)", fpsArg, fpsArg)
 
 	var cmd *exec.Cmd
 	switch strings.ToLower(format) {
 	case "avi":
-		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", "pipe:0", "-map", "0:v:0", "-c:v", "copy", outputPath)
+		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", "pipe:0", "-map", "0:v:0", "-c:v", "copy", "-bsf:v", setTSArg, "-fps_mode", "cfr", "-r", fpsArg, outputPath)
 	case "mp4":
-		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", "pipe:0", "-map", "0:v:0", "-c:v", "copy", "-movflags", "+faststart", outputPath)
+		cmd = exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-framerate", fpsArg, "-f", "h264", "-analyzeduration", "0", "-probesize", "32", "-fflags", "+genpts", "-i", "pipe:0", "-map", "0:v:0", "-c:v", "copy", "-bsf:v", setTSArg, "-fps_mode", "cfr", "-r", fpsArg, "-movflags", "+faststart", outputPath)
 	default:
 		return fmt.Errorf("unsupported container format: %s", format)
 	}
@@ -1235,7 +1237,7 @@ func writeHDRL(f *os.File, width, height, fps, totalFrames int) error {
 		suggestedBuffer = 1024 * 1024
 	}
 
-	hdrlSize := uint32(4 + (8+56) + (8 + 4 + (8 + 64) + (8 + 40)))
+	hdrlSize := uint32(4 + (8 + 56) + (8 + 4 + (8 + 64) + (8 + 40)))
 	if _, err := f.Write([]byte("LIST")); err != nil {
 		return err
 	}
