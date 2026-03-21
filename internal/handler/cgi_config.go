@@ -9,55 +9,57 @@ import (
 	"go-api-server/internal/service"
 )
 
-// CgiConfigHandler는 기본 CGI 접속값(devicePort/deviceUserId/deviceUserPw)을 조회/수정합니다.
+// CgiConfigHandler는 connect/record/debug 설정을 조회/수정합니다.
 func CgiConfigHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.Method {
 	case http.MethodGet:
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"statusCode": http.StatusOK,
-			"config":     service.GetDeviceCGIConfig(),
-		})
+		option := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("option")))
+		cfg := service.GetUnifiedConfig()
+		switch option {
+		case "":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(cfg)
+		case "connect":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"connect":    cfg.Connect,
+				"statusCode": http.StatusOK,
+			})
+		case "record":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"record":     cfg.Record,
+				"statusCode": http.StatusOK,
+			})
+		case "debug":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"debug":      cfg.Debug,
+				"statusCode": http.StatusOK,
+			})
+		default:
+			writeJSONError(w, http.StatusBadRequest, "option must be connect, record, or debug")
+		}
 		return
 	case http.MethodPut:
-		var req model.DeviceCGIConfigRequest
+		var req model.ConfigUpdateRequest
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.DevicePort < 1 || req.DevicePort > 65535 {
-			writeJSONError(w, http.StatusBadRequest, "devicePort must be between 1 and 65535")
-			return
-		}
-		if strings.TrimSpace(req.DeviceUserID) == "" || strings.TrimSpace(req.DeviceUserPW) == "" {
-			writeJSONError(w, http.StatusBadRequest, "deviceUserId and deviceUserPw are required")
-			return
-		}
-		sourceFPS := req.SourceFPS
-		if sourceFPS == 0 {
-			sourceFPS = service.GetDeviceCGIConfig().SourceFPS
-		}
-		if sourceFPS < 1 || sourceFPS > 120 {
-			writeJSONError(w, http.StatusBadRequest, "sourceFps must be between 1 and 120")
-			return
-		}
-
-		updated, err := service.UpdateDeviceCGIConfig(req.DevicePort, req.DeviceUserID, req.DeviceUserPW, sourceFPS)
+		updated, err := service.UpdateUnifiedConfig(req)
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"statusCode": http.StatusOK,
-			"message":    "cgi config updated",
-			"config":     updated,
-		})
+		updated.StatusCode = http.StatusOK
+		_ = json.NewEncoder(w).Encode(updated)
 		return
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")

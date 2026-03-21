@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go-api-server/internal/model"
 )
 
 const (
@@ -21,6 +23,10 @@ const (
 	defaultHostScanWorkerSize = 32
 	defaultHostScanUser       = "admin"
 	defaultHostScanPW         = "000000"
+	defaultContainerFormat    = "avi"
+	defaultContainerOut       = true
+	defaultDownloadDebug      = true
+	defaultJPGOut             = false
 )
 
 type HostRegistrySnapshot struct {
@@ -155,14 +161,18 @@ func markHostScanSchedulerStopped(runID int64) {
 }
 
 type hostScanConfig struct {
-	Port      int
-	SourceFPS int
-	User      string
-	PW        string
-	Timeout   time.Duration
-	Interval  time.Duration
-	Workers   int
-	LocalIP   string
+	Port            int
+	SourceFPS       int
+	User            string
+	PW              string
+	ContainerFormat string
+	ContainerOut    bool
+	Debug           bool
+	JpgOut          bool
+	Timeout         time.Duration
+	Interval        time.Duration
+	Workers         int
+	LocalIP         string
 }
 
 type hostScanConfigStore struct {
@@ -193,6 +203,13 @@ type DeviceCGIConfig struct {
 	SourceFPS    int    `json:"sourceFps"`
 }
 
+type DownloadRuntimeConfig struct {
+	Debug           bool
+	JpgOut          bool
+	ContainerOut    bool
+	ContainerFormat string
+}
+
 func GetHostScanCGIConfig() HostScanCGIConfig {
 	cfg := getHostScanConfig()
 	return HostScanCGIConfig{
@@ -211,6 +228,107 @@ func GetDeviceCGIConfig() DeviceCGIConfig {
 		DeviceUserPW: cfg.PW,
 		SourceFPS:    cfg.SourceFPS,
 	}
+}
+
+func GetUnifiedConfig() model.ConfigResponse {
+	cfg := getHostScanConfig()
+	return model.ConfigResponse{
+		Connect: model.ConfigConnect{
+			DevicePort:   cfg.Port,
+			DeviceUserID: cfg.User,
+			DeviceUserPW: cfg.PW,
+		},
+		Record: model.ConfigRecord{
+			SourceFPS:       cfg.SourceFPS,
+			ContainerFormat: cfg.ContainerFormat,
+			ContainerOut:    cfg.ContainerOut,
+		},
+		Debug: model.ConfigDebug{
+			Debug:  cfg.Debug,
+			JpgOut: cfg.JpgOut,
+		},
+		StatusCode: 200,
+	}
+}
+
+func GetDownloadRuntimeConfig() DownloadRuntimeConfig {
+	cfg := getHostScanConfig()
+	return DownloadRuntimeConfig{
+		Debug:           cfg.Debug,
+		JpgOut:          cfg.JpgOut,
+		ContainerOut:    cfg.ContainerOut,
+		ContainerFormat: cfg.ContainerFormat,
+	}
+}
+
+func UpdateUnifiedConfig(req model.ConfigUpdateRequest) (model.ConfigResponse, error) {
+	if req.Connect == nil && req.Record == nil && req.Debug == nil {
+		return model.ConfigResponse{}, fmt.Errorf("at least one of connect, record, debug is required")
+	}
+
+	globalHostScanConfig.mu.Lock()
+	cfg := globalHostScanConfig.cfg
+
+	if req.Connect != nil {
+		if req.Connect.DevicePort != nil {
+			if *req.Connect.DevicePort < 1 || *req.Connect.DevicePort > 65535 {
+				globalHostScanConfig.mu.Unlock()
+				return model.ConfigResponse{}, fmt.Errorf("devicePort must be between 1 and 65535")
+			}
+			cfg.Port = *req.Connect.DevicePort
+		}
+		if req.Connect.DeviceUserID != nil {
+			user := strings.TrimSpace(*req.Connect.DeviceUserID)
+			if user == "" {
+				globalHostScanConfig.mu.Unlock()
+				return model.ConfigResponse{}, fmt.Errorf("deviceUserId cannot be empty")
+			}
+			cfg.User = user
+		}
+		if req.Connect.DeviceUserPW != nil {
+			pw := strings.TrimSpace(*req.Connect.DeviceUserPW)
+			if pw == "" {
+				globalHostScanConfig.mu.Unlock()
+				return model.ConfigResponse{}, fmt.Errorf("deviceUserPw cannot be empty")
+			}
+			cfg.PW = pw
+		}
+	}
+
+	if req.Record != nil {
+		if req.Record.SourceFPS != nil {
+			if *req.Record.SourceFPS < 1 || *req.Record.SourceFPS > 120 {
+				globalHostScanConfig.mu.Unlock()
+				return model.ConfigResponse{}, fmt.Errorf("sourceFps must be between 1 and 120")
+			}
+			cfg.SourceFPS = *req.Record.SourceFPS
+		}
+		if req.Record.ContainerFormat != nil {
+			format := strings.ToLower(strings.TrimSpace(*req.Record.ContainerFormat))
+			if format != "avi" && format != "mp4" {
+				globalHostScanConfig.mu.Unlock()
+				return model.ConfigResponse{}, fmt.Errorf("containerFormat must be avi or mp4")
+			}
+			cfg.ContainerFormat = format
+		}
+		if req.Record.ContainerOut != nil {
+			cfg.ContainerOut = *req.Record.ContainerOut
+		}
+	}
+
+	if req.Debug != nil {
+		if req.Debug.Debug != nil {
+			cfg.Debug = *req.Debug.Debug
+		}
+		if req.Debug.JpgOut != nil {
+			cfg.JpgOut = *req.Debug.JpgOut
+		}
+	}
+
+	globalHostScanConfig.cfg = cfg
+	globalHostScanConfig.mu.Unlock()
+
+	return GetUnifiedConfig(), nil
 }
 
 func UpdateHostScanCGIConfig(port int, user, pw string) (HostScanCGIConfig, error) {
@@ -269,14 +387,18 @@ func getHostScanConfig() hostScanConfig {
 
 func loadHostScanConfig() hostScanConfig {
 	cfg := hostScanConfig{
-		Port:      defaultHostScanPort,
-		SourceFPS: defaultHostScanSourceFPS,
-		User:      defaultHostScanUser,
-		PW:        defaultHostScanPW,
-		Timeout:   defaultHostScanTimeout,
-		Interval:  defaultHostScanInterval,
-		Workers:   defaultHostScanWorkerSize,
-		LocalIP:   strings.TrimSpace(os.Getenv("HOST_SCAN_LOCAL_IP")),
+		Port:            defaultHostScanPort,
+		SourceFPS:       defaultHostScanSourceFPS,
+		User:            defaultHostScanUser,
+		PW:              defaultHostScanPW,
+		ContainerFormat: defaultContainerFormat,
+		ContainerOut:    defaultContainerOut,
+		Debug:           defaultDownloadDebug,
+		JpgOut:          defaultJPGOut,
+		Timeout:         defaultHostScanTimeout,
+		Interval:        defaultHostScanInterval,
+		Workers:         defaultHostScanWorkerSize,
+		LocalIP:         strings.TrimSpace(os.Getenv("HOST_SCAN_LOCAL_IP")),
 	}
 
 	if userVal := strings.TrimSpace(os.Getenv("HOST_SCAN_USER")); userVal != "" {
@@ -293,6 +415,26 @@ func loadHostScanConfig() hostScanConfig {
 	if fpsVal := strings.TrimSpace(os.Getenv("HOST_SCAN_SOURCE_FPS")); fpsVal != "" {
 		if parsed, err := strconv.Atoi(fpsVal); err == nil && parsed >= 1 && parsed <= 120 {
 			cfg.SourceFPS = parsed
+		}
+	}
+	if containerFormat := strings.ToLower(strings.TrimSpace(os.Getenv("HOST_SCAN_CONTAINER_FORMAT"))); containerFormat != "" {
+		if containerFormat == "avi" || containerFormat == "mp4" {
+			cfg.ContainerFormat = containerFormat
+		}
+	}
+	if containerOut := strings.TrimSpace(os.Getenv("HOST_SCAN_CONTAINER_OUT")); containerOut != "" {
+		if parsed, err := strconv.ParseBool(containerOut); err == nil {
+			cfg.ContainerOut = parsed
+		}
+	}
+	if debugFlag := strings.TrimSpace(os.Getenv("HOST_SCAN_DEBUG")); debugFlag != "" {
+		if parsed, err := strconv.ParseBool(debugFlag); err == nil {
+			cfg.Debug = parsed
+		}
+	}
+	if jpgOut := strings.TrimSpace(os.Getenv("HOST_SCAN_JPG_OUT")); jpgOut != "" {
+		if parsed, err := strconv.ParseBool(jpgOut); err == nil {
+			cfg.JpgOut = parsed
 		}
 	}
 	if timeoutVal := strings.TrimSpace(os.Getenv("HOST_SCAN_TIMEOUT_SEC")); timeoutVal != "" {

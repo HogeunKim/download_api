@@ -37,6 +37,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 	}
 	targetAddress := ResolveTargetAddress(req.DeviceIP)
 	cfg := GetHostScanCGIConfig()
+	runtimeCfg := GetDownloadRuntimeConfig()
 	channelIndexes, err := parseChannelIndexes(req.Channel)
 	if err != nil {
 		return result, err
@@ -59,7 +60,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 	if err != nil {
 		return result, err
 	}
-	if req.Debug {
+	if runtimeCfg.Debug {
 		fmt.Printf("[download debug] cgi url=%s\n", downloadURL)
 	}
 
@@ -82,7 +83,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 		return result, fmt.Errorf("download.cgi returned empty body")
 	}
 
-	start, end, audioFrameCount, videoFrameCount, videoFormat, outputFPS, _, frames, err := ParseDownloadStreamToRawVideo(body, req.TargetFolder, req.Debug)
+	start, end, audioFrameCount, videoFrameCount, videoFormat, outputFPS, _, frames, err := ParseDownloadStreamToRawVideo(body, req.TargetFolder, runtimeCfg.Debug)
 	if err != nil {
 		return result, err
 	}
@@ -97,7 +98,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 	result.VideoFormat = videoFormat
 	result.SelectedOutputFPS = outputFPS
 
-	if req.JpgOut {
+	if runtimeCfg.JpgOut {
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(channelIndexes))
 		for _, ch := range channelIndexes {
@@ -110,7 +111,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 					errCh <- fmt.Errorf("channel %d jpg decode failed: %w", ch, err)
 					return
 				}
-				if err := TranscodeRawBytesToJPGWithMap(channelRaw, req.TargetFolder, outputFPS, ch, req.Debug); err != nil {
+				if err := TranscodeRawBytesToJPGWithMap(channelRaw, req.TargetFolder, outputFPS, ch, runtimeCfg.Debug); err != nil {
 					errCh <- fmt.Errorf("channel %d jpg transcode failed: %w", ch, err)
 					return
 				}
@@ -124,8 +125,8 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 			}
 		}
 	}
-	if req.ContainerOut {
-		containerFormat := normalizeContainerFormat(req.ContainerFormat)
+	if runtimeCfg.ContainerOut {
+		containerFormat := normalizeContainerFormat(runtimeCfg.ContainerFormat)
 		paths := make([]string, len(channelIndexes))
 		requestDurationSec := estimateRequestDurationSeconds(req.Begin, req.End)
 		var wg sync.WaitGroup
@@ -144,10 +145,10 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 				frameCount := countFramesForChannel(frames, ch)
 				muxFPS := chooseMuxInputFPS(frameCount, requestDurationSec, sourceFPS)
 				containerPath := buildOutputContainerPathByChannel(req.TargetFolder, req.Begin, req.End, ch, containerFormat)
-				if req.Debug {
+				if runtimeCfg.Debug {
 					fmt.Printf("[container fps] ch=%d frameCount=%d durationSec=%.3f muxInputFPS=%s\n", ch, frameCount, requestDurationSec, formatFFmpegFPS(muxFPS))
 				}
-				if err := TranscodeRawBytesToContainerWithMap(channelRaw, containerPath, containerFormat, muxFPS, ch, req.Debug); err != nil {
+				if err := TranscodeRawBytesToContainerWithMap(channelRaw, containerPath, containerFormat, muxFPS, ch, runtimeCfg.Debug); err != nil {
 					errCh <- fmt.Errorf("channel %d container transcode failed: %w", ch, err)
 					return
 				}
