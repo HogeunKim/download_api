@@ -25,6 +25,7 @@ func main() {
 	mux.HandleFunc("POST /users", handler.UserHandler)
 	mux.HandleFunc("POST /info", handler.InfoHandler)
 	mux.HandleFunc("POST /download", handler.DownloadHandler)
+	mux.HandleFunc("POST /record-list", handler.RecordListHandler)
 	mux.HandleFunc("GET /config", handler.CgiConfigHandler)
 	mux.HandleFunc("PUT /config", handler.CgiConfigHandler)
 	mux.HandleFunc("GET /host-scan/config", handler.HostScanConfigHandler)

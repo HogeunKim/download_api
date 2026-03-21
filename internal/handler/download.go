@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -91,8 +92,7 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		"endTime":           result.EndTime,
 		"videoFormat":       result.VideoFormat,
 		"selectedOutputFPS": result.SelectedOutputFPS,
-		"containerPath":     result.ContainerPath,
-		"containerPaths":    result.ContainerPaths,
+		"containerList":     result.ContainerList,
 		"containerFormat":   result.ContainerFormat,
 		"audioFrameCount":   result.AudioFrameCount,
 		"videoFrameCount":   result.VideoFrameCount,
@@ -124,8 +124,14 @@ func buildRunningNotifyPayload(requestID int64, targetIP string) service.Downloa
 }
 
 func validateDownloadRequest(req model.DownloadRequest) error {
-	if req.DeviceIP == "" || req.TargetFolder == "" || req.Channel == "" || req.Begin == "" || req.End == "" {
-		return errors.New("deviceIp, channels, rangeBegin, rangeEnd, targetFolder are required")
+	if req.DeviceIP == "" || req.TargetFolder == "" || req.Begin == "" || req.End == "" {
+		return errors.New("deviceIp, rangeBegin, rangeEnd, targetFolder are required")
+	}
+	if len(req.ChannelList) == 0 {
+		return errors.New("channelList is required")
+	}
+	if err := validateChannelList(req.ChannelList); err != nil {
+		return err
 	}
 	callbackURL := normalizeOptionalString(req.CallbackURL)
 	if callbackURL != "" {
@@ -147,6 +153,28 @@ func validateDownloadRequest(req model.DownloadRequest) error {
 		timestampWithTWithMillisPattern.MatchString(req.End)
 	if !beginValid || !endValid {
 		return errors.New("begin and end must be yyyyMMddTHHmmss or yyyyMMddTHHmmssSSS")
+	}
+	return nil
+}
+
+func validateChannelList(channelList []model.DownloadChannel) error {
+	seen := make(map[int]struct{}, len(channelList))
+	for _, item := range channelList {
+		if item.Channel < 1 || item.Channel > 8 {
+			return errors.New("channelList.channel must be between 1 and 8")
+		}
+		if _, ok := seen[item.Channel]; ok {
+			return errors.New("channelList.channel contains duplicate value")
+		}
+		seen[item.Channel] = struct{}{}
+
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return errors.New("channelList.name is required")
+		}
+		if filepath.Base(name) != name {
+			return errors.New("channelList.name must be a file name without directory")
+		}
 	}
 	return nil
 }

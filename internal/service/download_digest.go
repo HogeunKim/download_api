@@ -24,21 +24,25 @@ type DownloadResult struct {
 	VideoFrameCount   int
 	VideoFormat       string
 	SelectedOutputFPS int
-	ContainerPath     string
-	ContainerPaths    []string
+	ContainerList     []DownloadContainerItem
 	ContainerFormat   string
+}
+
+type DownloadContainerItem struct {
+	Channel int    `json:"channel"`
+	Path    string `json:"path"`
 }
 
 func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (DownloadResult, error) {
 	result := DownloadResult{
-		TargetPath:     req.TargetFolder,
-		Saved:          false,
-		ContainerPaths: []string{},
+		TargetPath:    req.TargetFolder,
+		Saved:         false,
+		ContainerList: []DownloadContainerItem{},
 	}
 	targetAddress := ResolveTargetAddress(req.DeviceIP)
 	cfg := GetHostScanCGIConfig()
 	runtimeCfg := GetDownloadRuntimeConfig()
-	channelIndexes, err := parseChannelIndexes(req.Channel)
+	channelIndexes, channelNameByIndex, err := parseDownloadChannels(req.ChannelList)
 	if err != nil {
 		return result, err
 	}
@@ -51,7 +55,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 		return result, fmt.Errorf("target info.cgi returned empty response")
 	}
 
-	channelHex, err := channelToBitMaskHex(req.Channel)
+	channelHex, err := channelIndexesToBitMaskHex(channelIndexes)
 	if err != nil {
 		return result, err
 	}
@@ -127,7 +131,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 	}
 	if runtimeCfg.ContainerOut {
 		containerFormat := normalizeContainerFormat(runtimeCfg.ContainerFormat)
-		paths := make([]string, len(channelIndexes))
+		containerList := make([]DownloadContainerItem, len(channelIndexes))
 		requestDurationSec := estimateRequestDurationSeconds(req.Begin, req.End)
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(channelIndexes))
@@ -144,7 +148,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 				}
 				frameCount := countFramesForChannel(frames, ch)
 				muxFPS := chooseMuxInputFPS(frameCount, requestDurationSec, sourceFPS)
-				containerPath := buildOutputContainerPathByChannel(req.TargetFolder, req.Begin, req.End, ch, containerFormat)
+				containerPath := buildOutputContainerPathByChannelName(req.TargetFolder, channelNameByIndex[ch])
 				if runtimeCfg.Debug {
 					fmt.Printf("[container fps] ch=%d frameCount=%d durationSec=%.3f muxInputFPS=%s\n", ch, frameCount, requestDurationSec, formatFFmpegFPS(muxFPS))
 				}
@@ -152,7 +156,10 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 					errCh <- fmt.Errorf("channel %d container transcode failed: %w", ch, err)
 					return
 				}
-				paths[i] = containerPath
+				containerList[i] = DownloadContainerItem{
+					Channel: ch,
+					Path:    containerPath,
+				}
 			}()
 		}
 		wg.Wait()
@@ -162,10 +169,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 				return result, err
 			}
 		}
-		result.ContainerPaths = paths
-		if len(paths) > 0 {
-			result.ContainerPath = paths[0]
-		}
+		result.ContainerList = containerList
 		result.ContainerFormat = containerFormat
 	}
 	if !start.IsZero() {
@@ -177,43 +181,31 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 	return result, nil
 }
 
-func buildOutputContainerPath(targetFolder, begin, end, channelHex, containerFormat string) string {
-	safeChannel := strings.ReplaceAll(strings.ToLower(channelHex), ",", "-")
-	fileName := fmt.Sprintf("download_%s_%s_ch%s.%s", begin, end, safeChannel, containerFormat)
+func buildOutputContainerPathByChannelName(targetFolder, fileName string) string {
 	return filepath.Clean(filepath.Join(targetFolder, fileName))
 }
 
-func buildOutputContainerPathByChannel(targetFolder, begin, end string, channelIndex int, containerFormat string) string {
-	fileName := fmt.Sprintf("download_%s_%s_ch%d.%s", begin, end, channelIndex, containerFormat)
-	return filepath.Clean(filepath.Join(targetFolder, fileName))
-}
-
-func parseChannelIndexes(channelInput string) ([]int, error) {
-	tokens := strings.Split(channelInput, ",")
-	out := make([]int, 0, len(tokens))
-	seen := make(map[int]struct{})
-	for _, token := range tokens {
-		trimmed := strings.TrimSpace(token)
-		if trimmed == "" {
-			continue
-		}
-		val, err := strconv.Atoi(trimmed)
-		if err != nil {
-			return nil, fmt.Errorf("invalid channel value: %s", trimmed)
-		}
-		if val < 1 || val > 8 {
-			return nil, fmt.Errorf("channel out of range: %d", val)
-		}
-		if _, ok := seen[val]; ok {
-			continue
-		}
-		seen[val] = struct{}{}
-		out = append(out, val)
+func parseDownloadChannels(channelList []model.DownloadChannel) ([]int, map[int]string, error) {
+	if len(channelList) == 0 {
+		return nil, nil, fmt.Errorf("channelList is required")
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("channel is required")
+	out := make([]int, 0, len(channelList))
+	nameByChannel := make(map[int]string, len(channelList))
+	for _, item := range channelList {
+		if item.Channel < 1 || item.Channel > 8 {
+			return nil, nil, fmt.Errorf("channel out of range: %d", item.Channel)
+		}
+		if _, ok := nameByChannel[item.Channel]; ok {
+			return nil, nil, fmt.Errorf("duplicate channel in channelList: %d", item.Channel)
+		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return nil, nil, fmt.Errorf("channel %d name is required", item.Channel)
+		}
+		out = append(out, item.Channel)
+		nameByChannel[item.Channel] = name
 	}
-	return out, nil
+	return out, nameByChannel, nil
 }
 
 func estimateRequestDurationSeconds(begin, end string) float64 {
@@ -310,20 +302,10 @@ func normalizeDownloadCGITime(value string) (string, error) {
 	return base + "000", nil
 }
 
-func channelToBitMaskHex(channelInput string) (string, error) {
-	tokens := strings.Split(channelInput, ",")
+func channelIndexesToBitMaskHex(channelIndexes []int) (string, error) {
 	var mask uint64
 
-	for _, token := range tokens {
-		trimmed := strings.TrimSpace(token)
-		if trimmed == "" {
-			continue
-		}
-
-		channelIdx, err := strconv.Atoi(trimmed)
-		if err != nil {
-			return "", fmt.Errorf("invalid channel value: %s", trimmed)
-		}
+	for _, channelIdx := range channelIndexes {
 		if channelIdx < 1 || channelIdx > 64 {
 			return "", fmt.Errorf("channel out of range: %d", channelIdx)
 		}
