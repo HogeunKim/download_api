@@ -33,7 +33,7 @@ type DownloadContainerItem struct {
 	Path    string `json:"path"`
 }
 
-func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (DownloadResult, error) {
+func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest, onStreamStarted func()) (DownloadResult, error) {
 	result := DownloadResult{
 		TargetPath:    req.TargetFolder,
 		Saved:         false,
@@ -69,7 +69,17 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	body, statusCode, err := doDigestRequest(ctx, client, http.MethodGet, downloadURL, cfg.User, cfg.PW)
+	var streamStarted sync.Once
+	body, statusCode, err := doDigestRequestWithProgress(ctx, client, http.MethodGet, downloadURL, cfg.User, cfg.PW, func(receivedBytes, totalBytes int64) {
+		if receivedBytes <= 0 {
+			return
+		}
+		streamStarted.Do(func() {
+			if onStreamStarted != nil {
+				onStreamStarted()
+			}
+		})
+	})
 	if err != nil {
 		return result, err
 	}

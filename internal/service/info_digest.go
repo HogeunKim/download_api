@@ -17,6 +17,8 @@ import (
 	"go-api-server/internal/model"
 )
 
+const targetCGIRequestTimeout = 3 * time.Second
+
 type TargetHTTPError struct {
 	StatusCode int
 	Message    string
@@ -34,7 +36,7 @@ func FetchInfoFromTarget(ctx context.Context, req model.InfoRequest) (map[string
 func FetchInfoFromTargetWithCredentials(ctx context.Context, ip string, port int, user, pw string) (map[string]any, error) {
 	targetURL := fmt.Sprintf("http://%s/info.cgi", net.JoinHostPort(ip, fmt.Sprintf("%d", port)))
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: targetCGIRequestTimeout,
 	}
 
 	body, statusCode, err := doDigestRequest(ctx, client, http.MethodGet, targetURL, user, pw)

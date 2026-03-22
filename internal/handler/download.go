@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"go-api-server/internal/model"
@@ -47,15 +48,26 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer service.ReleaseDownloadJob(deviceIP)
 
-	service.NotifyDownloadCallback(r.Context(), callbackURL, buildRunningNotifyPayload(req.RequestID, deviceIP, req.TargetFolder))
+	var (
+		notifyStartOnce sync.Once
+		cancelNotify    context.CancelFunc
+		notifyDone      chan struct{}
+	)
+	startRunningNotify := func() {
+		notifyStartOnce.Do(func() {
+			service.NotifyDownloadCallback(r.Context(), callbackURL, buildRunningNotifyPayload(req.RequestID, deviceIP, req.TargetFolder))
+			notifyCtx, cancel := context.WithCancel(r.Context())
+			cancelNotify = cancel
+			notifyDone = make(chan struct{})
+			go runRunningNotifier(notifyCtx, notifyDone, callbackURL, req.RequestID, deviceIP, req.TargetFolder)
+		})
+	}
 
-	notifyCtx, cancelNotify := context.WithCancel(r.Context())
-	notifyDone := make(chan struct{})
-	go runRunningNotifier(notifyCtx, notifyDone, callbackURL, req.RequestID, deviceIP, req.TargetFolder)
-
-	result, err := service.DownloadToLocalPath(r.Context(), req)
-	cancelNotify()
-	<-notifyDone
+	result, err := service.DownloadToLocalPath(r.Context(), req, startRunningNotify)
+	if cancelNotify != nil {
+		cancelNotify()
+		<-notifyDone
+	}
 	if err != nil {
 		service.NotifyDownloadCallback(r.Context(), callbackURL, service.DownloadNotifyPayload{
 			Event:      "failed",
@@ -93,10 +105,9 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		"startTime":         result.StartTime,
 		"endTime":           result.EndTime,
 		"videoFormat":       result.VideoFormat,
-		"selectedOutputFPS": result.SelectedOutputFPS,
+		"containerFps":      result.SelectedOutputFPS,
 		"containerList":     result.ContainerList,
 		"containerFormat":   result.ContainerFormat,
-		"audioFrameCount":   result.AudioFrameCount,
 		"videoFrameCount":   result.VideoFrameCount,
 	})
 }

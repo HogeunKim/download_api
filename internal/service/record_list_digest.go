@@ -39,7 +39,7 @@ func FetchRecordListFromTarget(ctx context.Context, deviceIP string) (model.Reco
 
 	cfg := GetHostScanCGIConfig()
 	targetURL := fmt.Sprintf("http://%s/datalist.cgi", net.JoinHostPort(targetAddress, strconv.Itoa(cfg.Port)))
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: targetCGIRequestTimeout}
 
 	body, statusCode, err := doDigestRequest(ctx, client, http.MethodGet, targetURL, cfg.User, cfg.PW)
 	if err != nil {
