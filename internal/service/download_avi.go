@@ -60,6 +60,8 @@ type h264Frame struct {
 	data        []byte
 	keyFrame    bool
 	timestamp   time.Time
+	tTimeSec    int64
+	tTimeUsec   int64
 	format      string
 	fps         uint32
 	channelMask uint8
@@ -70,13 +72,13 @@ type h264CodecState struct {
 	pps []byte
 }
 
-func ParseDownloadStreamToRawVideo(downloadBody []byte, targetFolder string, debug bool) (time.Time, time.Time, int, int, string, int, []byte, []h264Frame, error) {
+func ParseDownloadStreamToRawVideo(downloadBody []byte, targetFolder string, debug bool, onFrameParsed func(h264Frame)) (time.Time, time.Time, int, int, string, int, []byte, []h264Frame, error) {
 	cleanFolder := filepath.Clean(targetFolder)
 	if err := os.MkdirAll(cleanFolder, 0o755); err != nil {
 		return time.Time{}, time.Time{}, 0, 0, "", 0, nil, nil, fmt.Errorf("failed to create target folder: %w", err)
 	}
 
-	frames, _, _, audioFrameCount, _, err := extractH264Frames(downloadBody, debug, cleanFolder)
+	frames, _, _, audioFrameCount, _, err := extractH264Frames(downloadBody, debug, cleanFolder, onFrameParsed)
 	if err != nil {
 		return time.Time{}, time.Time{}, 0, 0, "", 0, nil, nil, err
 	}
@@ -96,7 +98,7 @@ func ParseDownloadStreamToRawVideo(downloadBody []byte, targetFolder string, deb
 	return start, end, audioFrameCount, videoFrameCount, videoFormat, outputFPS, rawVideo, frames, nil
 }
 
-func extractH264Frames(stream []byte, debug bool, targetFolder string) ([]h264Frame, time.Time, time.Time, int, int, error) {
+func extractH264Frames(stream []byte, debug bool, targetFolder string, onFrameParsed func(h264Frame)) ([]h264Frame, time.Time, time.Time, int, int, error) {
 	if len(stream) == 0 {
 		return nil, time.Time{}, time.Time{}, 0, 0, fmt.Errorf("empty stream data")
 	}
@@ -221,10 +223,15 @@ func extractH264Frames(stream []byte, debug bool, targetFolder string) ([]h264Fr
 				data:        slices.Clone(payload),
 				keyFrame:    frameType == 0,
 				timestamp:   frameTime,
+				tTimeSec:    secRaw,
+				tTimeUsec:   usecRaw,
 				format:      sanitizeFourCC(tag),
 				fps:         nFPS,
 				channelMask: nChannelRaw,
 			})
+			if onFrameParsed != nil {
+				onFrameParsed(frames[len(frames)-1])
+			}
 			videoFrameCount++
 		}
 		offset += totalSize
@@ -518,7 +525,7 @@ func TranscodeRawBytesToContainer(rawVideo []byte, outputPath, format string, fp
 	return TranscodeRawToContainer(tmpPath, outputPath, format, fps, debug)
 }
 
-func TranscodeRawBytesToContainerWithMap(rawVideo []byte, outputPath, format string, fps float64, channelIndex int, debug bool) error {
+func TranscodeRawBytesToContainerWithMap(rawVideo []byte, outputPath, format string, fps float64, channelIndex int, debug bool, onWriteProgress func(int)) error {
 	if len(rawVideo) == 0 {
 		return fmt.Errorf("failed to transcode: empty raw video payload")
 	}
@@ -553,10 +560,27 @@ func TranscodeRawBytesToContainerWithMap(rawVideo []byte, outputPath, format str
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start ffmpeg for channel %d: %w", channelIndex, err)
 	}
-	if _, err := stdin.Write(rawVideo); err != nil {
-		_ = stdin.Close()
-		_ = cmd.Wait()
-		return fmt.Errorf("failed to write channel %d raw stream to ffmpeg pipe: %w", channelIndex, err)
+	const writeChunkSize = 64 * 1024
+	for offset := 0; offset < len(rawVideo); {
+		end := offset + writeChunkSize
+		if end > len(rawVideo) {
+			end = len(rawVideo)
+		}
+		written, err := stdin.Write(rawVideo[offset:end])
+		if written > 0 && onWriteProgress != nil {
+			onWriteProgress(written)
+		}
+		if err != nil {
+			_ = stdin.Close()
+			_ = cmd.Wait()
+			return fmt.Errorf("failed to write channel %d raw stream to ffmpeg pipe: %w", channelIndex, err)
+		}
+		if written <= 0 {
+			_ = stdin.Close()
+			_ = cmd.Wait()
+			return fmt.Errorf("failed to write channel %d raw stream to ffmpeg pipe: zero bytes written", channelIndex)
+		}
+		offset += written
 	}
 	_ = stdin.Close()
 	if err := cmd.Wait(); err != nil {

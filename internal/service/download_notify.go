@@ -6,37 +6,59 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
-const MaxConcurrentDownloadJobs = 1
-
-var downloadJobSemaphore = make(chan struct{}, MaxConcurrentDownloadJobs)
+var (
+	downloadJobMu      sync.Mutex
+	activeDownloadByIP = make(map[string]int)
+)
 
 type DownloadNotifyPayload struct {
 	Event      string `json:"event"`
 	RequestID  int64  `json:"requestId"`
-	TargetIP   string `json:"targetIp"`
+	DeviceIP   string `json:"deviceIp"`
 	Message    string `json:"message,omitempty"`
 	Timestamp  string `json:"timestamp"`
 	Saved      bool   `json:"saved,omitempty"`
 	TargetPath string `json:"targetPath,omitempty"`
 }
 
-func TryAcquireDownloadJob() bool {
-	select {
-	case downloadJobSemaphore <- struct{}{}:
-		return true
-	default:
+func TryAcquireDownloadJob(targetIP string) bool {
+	key := normalizeDownloadTargetKey(targetIP)
+	if key == "" {
 		return false
 	}
+
+	downloadJobMu.Lock()
+	defer downloadJobMu.Unlock()
+
+	if activeDownloadByIP[key] > 0 {
+		return false
+	}
+	activeDownloadByIP[key] = 1
+	return true
 }
 
-func ReleaseDownloadJob() {
-	select {
-	case <-downloadJobSemaphore:
-	default:
+func ReleaseDownloadJob(targetIP string) {
+	key := normalizeDownloadTargetKey(targetIP)
+	if key == "" {
+		return
 	}
+
+	downloadJobMu.Lock()
+	defer downloadJobMu.Unlock()
+
+	if activeDownloadByIP[key] <= 1 {
+		delete(activeDownloadByIP, key)
+		return
+	}
+	activeDownloadByIP[key]--
+}
+
+func normalizeDownloadTargetKey(targetIP string) string {
+	return strings.ToLower(strings.TrimSpace(targetIP))
 }
 
 func NotifyDownloadCallback(ctx context.Context, callbackURL string, payload DownloadNotifyPayload) {

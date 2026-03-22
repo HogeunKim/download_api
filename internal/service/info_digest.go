@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/rand"
@@ -129,6 +130,10 @@ type digestChallenge struct {
 }
 
 func doDigestRequest(ctx context.Context, client *http.Client, method, url, username, password string) ([]byte, int, error) {
+	return doDigestRequestWithProgress(ctx, client, method, url, username, password, nil)
+}
+
+func doDigestRequestWithProgress(ctx context.Context, client *http.Client, method, url, username, password string, onProgress func(receivedBytes, totalBytes int64)) ([]byte, int, error) {
 	firstReq, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
@@ -141,7 +146,7 @@ func doDigestRequest(ctx context.Context, client *http.Client, method, url, user
 	defer firstResp.Body.Close()
 
 	if firstResp.StatusCode != http.StatusUnauthorized {
-		body, readErr := io.ReadAll(firstResp.Body)
+		body, readErr := readAllWithProgress(firstResp.Body, firstResp.ContentLength, onProgress)
 		if readErr != nil {
 			return nil, firstResp.StatusCode, fmt.Errorf("failed to read target response: %w", readErr)
 		}
@@ -171,12 +176,36 @@ func doDigestRequest(ctx context.Context, client *http.Client, method, url, user
 	}
 	defer secondResp.Body.Close()
 
-	body, err := io.ReadAll(secondResp.Body)
+	body, err := readAllWithProgress(secondResp.Body, secondResp.ContentLength, onProgress)
 	if err != nil {
 		return nil, secondResp.StatusCode, fmt.Errorf("failed to read target response: %w", err)
 	}
 
 	return body, secondResp.StatusCode, nil
+}
+
+func readAllWithProgress(reader io.Reader, totalBytes int64, onProgress func(receivedBytes, totalBytes int64)) ([]byte, error) {
+	if onProgress == nil {
+		return io.ReadAll(reader)
+	}
+
+	buf := make([]byte, 32*1024)
+	var out bytes.Buffer
+	var received int64
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			received += int64(n)
+			_, _ = out.Write(buf[:n])
+			onProgress(received, totalBytes)
+		}
+		if err != nil {
+			if err == io.EOF {
+				return out.Bytes(), nil
+			}
+			return nil, err
+		}
+	}
 }
 
 func parseDigestChallenge(header string) (digestChallenge, error) {

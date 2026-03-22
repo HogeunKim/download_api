@@ -40,29 +40,30 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		req.RequestID = time.Now().UnixMilli()
 	}
 	callbackURL := normalizeOptionalString(req.CallbackURL)
-	targetIP := service.ResolveTargetAddress(req.DeviceIP)
-	if !service.TryAcquireDownloadJob() {
-		writeJSONError(w, http.StatusTooManyRequests, "too many concurrent download jobs")
+	deviceIP := service.ResolveTargetAddress(req.DeviceIP)
+	if !service.TryAcquireDownloadJob(deviceIP) {
+		writeJSONError(w, http.StatusConflict, "download already in progress for this deviceIp")
 		return
 	}
-	defer service.ReleaseDownloadJob()
+	defer service.ReleaseDownloadJob(deviceIP)
 
-	service.NotifyDownloadCallback(r.Context(), callbackURL, buildRunningNotifyPayload(req.RequestID, targetIP))
+	service.NotifyDownloadCallback(r.Context(), callbackURL, buildRunningNotifyPayload(req.RequestID, deviceIP, req.TargetFolder))
 
 	notifyCtx, cancelNotify := context.WithCancel(r.Context())
 	notifyDone := make(chan struct{})
-	go runRunningNotifier(notifyCtx, notifyDone, callbackURL, req.RequestID, targetIP)
+	go runRunningNotifier(notifyCtx, notifyDone, callbackURL, req.RequestID, deviceIP, req.TargetFolder)
 
 	result, err := service.DownloadToLocalPath(r.Context(), req)
 	cancelNotify()
 	<-notifyDone
 	if err != nil {
 		service.NotifyDownloadCallback(r.Context(), callbackURL, service.DownloadNotifyPayload{
-			Event:     "failed",
-			RequestID: req.RequestID,
-			TargetIP:  targetIP,
-			Message:   err.Error(),
-			Timestamp: time.Now().Format(time.RFC3339),
+			Event:      "failed",
+			RequestID:  req.RequestID,
+			DeviceIP:   deviceIP,
+			Message:    err.Error(),
+			Timestamp:  time.Now().Format(time.RFC3339),
+			TargetPath: req.TargetFolder,
 		})
 		var targetErr *service.TargetHTTPError
 		if errors.As(err, &targetErr) {
@@ -75,7 +76,8 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	service.NotifyDownloadCallback(r.Context(), callbackURL, service.DownloadNotifyPayload{
 		Event:      "completed",
 		RequestID:  req.RequestID,
-		TargetIP:   targetIP,
+		DeviceIP:   deviceIP,
+		Message:    "download completed",
 		Timestamp:  time.Now().Format(time.RFC3339),
 		Saved:      result.Saved,
 		TargetPath: result.TargetPath,
@@ -97,30 +99,6 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		"audioFrameCount":   result.AudioFrameCount,
 		"videoFrameCount":   result.VideoFrameCount,
 	})
-}
-
-func runRunningNotifier(ctx context.Context, done chan<- struct{}, callbackURL string, requestID int64, targetIP string) {
-	defer close(done)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			service.NotifyDownloadCallback(ctx, callbackURL, buildRunningNotifyPayload(requestID, targetIP))
-		}
-	}
-}
-
-func buildRunningNotifyPayload(requestID int64, targetIP string) service.DownloadNotifyPayload {
-	return service.DownloadNotifyPayload{
-		Event:     "running",
-		RequestID: requestID,
-		TargetIP:  targetIP,
-		Message:   "download in progress",
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
 }
 
 func validateDownloadRequest(req model.DownloadRequest) error {
@@ -155,6 +133,31 @@ func validateDownloadRequest(req model.DownloadRequest) error {
 		return errors.New("begin and end must be yyyyMMddTHHmmss or yyyyMMddTHHmmssSSS")
 	}
 	return nil
+}
+
+func runRunningNotifier(ctx context.Context, done chan<- struct{}, callbackURL string, requestID int64, deviceIP, targetPath string) {
+	defer close(done)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			service.NotifyDownloadCallback(ctx, callbackURL, buildRunningNotifyPayload(requestID, deviceIP, targetPath))
+		}
+	}
+}
+
+func buildRunningNotifyPayload(requestID int64, deviceIP, targetPath string) service.DownloadNotifyPayload {
+	return service.DownloadNotifyPayload{
+		Event:      "running",
+		RequestID:  requestID,
+		DeviceIP:   deviceIP,
+		Message:    "download in progress",
+		Timestamp:  time.Now().Format(time.RFC3339),
+		TargetPath: targetPath,
+	}
 }
 
 func validateChannelList(channelList []model.DownloadChannel) error {

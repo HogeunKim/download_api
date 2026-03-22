@@ -87,7 +87,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 		return result, fmt.Errorf("download.cgi returned empty body")
 	}
 
-	start, end, audioFrameCount, videoFrameCount, videoFormat, outputFPS, _, frames, err := ParseDownloadStreamToRawVideo(body, req.TargetFolder, runtimeCfg.Debug)
+	start, end, audioFrameCount, videoFrameCount, videoFormat, outputFPS, _, frames, err := ParseDownloadStreamToRawVideo(body, req.TargetFolder, runtimeCfg.Debug, nil)
 	if err != nil {
 		return result, err
 	}
@@ -132,6 +132,14 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 	if runtimeCfg.ContainerOut {
 		containerFormat := normalizeContainerFormat(runtimeCfg.ContainerFormat)
 		containerList := make([]DownloadContainerItem, len(channelIndexes))
+		channelRawByIndex := make(map[int][]byte, len(channelIndexes))
+		for _, ch := range channelIndexes {
+			channelRaw, err := buildRawVideoBytesByChannel(frames, ch)
+			if err != nil {
+				return result, fmt.Errorf("channel %d container build failed: %w", ch, err)
+			}
+			channelRawByIndex[ch] = channelRaw
+		}
 		requestDurationSec := estimateRequestDurationSeconds(req.Begin, req.End)
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(channelIndexes))
@@ -141,11 +149,7 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				channelRaw, err := buildRawVideoBytesByChannel(frames, ch)
-				if err != nil {
-					errCh <- fmt.Errorf("channel %d container build failed: %w", ch, err)
-					return
-				}
+				channelRaw := channelRawByIndex[ch]
 				frameCount := countFramesForChannel(frames, ch)
 				muxFPS := chooseMuxInputFPS(frameCount, requestDurationSec, sourceFPS)
 				containerPath := buildOutputContainerPathByChannelName(req.TargetFolder, channelNameByIndex[ch])
@@ -153,10 +157,11 @@ func DownloadToLocalPath(ctx context.Context, req model.DownloadRequest) (Downlo
 					fmt.Printf("[container match] channel=%d path=%s\n", ch, containerPath)
 					fmt.Printf("[container fps] ch=%d frameCount=%d durationSec=%.3f muxInputFPS=%s\n", ch, frameCount, requestDurationSec, formatFFmpegFPS(muxFPS))
 				}
-				if err := TranscodeRawBytesToContainerWithMap(channelRaw, containerPath, containerFormat, muxFPS, ch, runtimeCfg.Debug); err != nil {
+				if err := TranscodeRawBytesToContainerWithMap(channelRaw, containerPath, containerFormat, muxFPS, ch, runtimeCfg.Debug, nil); err != nil {
 					errCh <- fmt.Errorf("channel %d container transcode failed: %w", ch, err)
 					return
 				}
+
 				containerList[i] = DownloadContainerItem{
 					Channel: ch,
 					Path:    containerPath,
