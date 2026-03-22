@@ -13,6 +13,7 @@ type callbackEvent struct {
 	Event      string `json:"event"`
 	RequestID  int64  `json:"requestId"`
 	DeviceIP   string `json:"deviceIp"`
+	GoServerIP string `json:"goServerIp,omitempty"`
 	Message    string `json:"message,omitempty"`
 	Timestamp  string `json:"timestamp"`
 	Saved      bool   `json:"saved,omitempty"`
@@ -67,8 +68,8 @@ func main() {
 
 		event.ReceivedAt = time.Now().Format(time.RFC3339)
 		store.add(event)
-		log.Printf("[callback] event=%s requestId=%d deviceIp=%s message=%s saved=%t targetPath=%s",
-			event.Event, event.RequestID, event.DeviceIP, event.Message, event.Saved, event.TargetPath)
+		log.Printf("[callback] event=%s requestId=%d deviceIp=%s goServerIp=%s message=%s saved=%t targetPath=%s",
+			event.Event, event.RequestID, event.DeviceIP, event.GoServerIP, event.Message, event.Saved, event.TargetPath)
 
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{
