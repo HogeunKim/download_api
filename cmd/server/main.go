@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"go-api-server/internal/handler"
 	"go-api-server/internal/service"
 )
+
+var Version = "1.0.1"
 
 func main() {
 	rootCtx, cancel := context.WithCancel(context.Background())
@@ -26,6 +29,14 @@ func main() {
 	mux.HandleFunc("POST /info", handler.InfoHandler)
 	mux.HandleFunc("POST /download", handler.DownloadHandler)
 	mux.HandleFunc("POST /record-list", handler.RecordListHandler)
+	mux.HandleFunc("GET /version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"statusCode": http.StatusOK,
+			"version":    Version,
+		})
+	})
 	mux.HandleFunc("GET /config", handler.CgiConfigHandler)
 	mux.HandleFunc("PUT /config", handler.CgiConfigHandler)
 	mux.HandleFunc("GET /host-scan/config", handler.HostScanConfigHandler)
@@ -39,6 +50,7 @@ func main() {
 
 	fmt.Println("========================================")
 	fmt.Printf("Go API Server 가동 중...\n")
+	fmt.Printf("API 버전 : %s\n", Version)
 	fmt.Printf("접속 주소: http://localhost%s\n", port)
 	fmt.Printf("현재 OS 로그 경로: %s\n", logPath)
 	fmt.Println("========================================")
