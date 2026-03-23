@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 IMAGE_NAME="${1:-go-api-server}"
 TAG="${2:-latest}"
 PLATFORM="${3:-linux/amd64}"
@@ -13,13 +16,26 @@ echo "Platform  : ${PLATFORM}"
 echo "Output tar: ${OUTPUT_TAR}"
 echo "========================================"
 
-docker version >/dev/null
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker command not found. Install Docker and verify PATH." >&2
+  exit 1
+fi
+
+if ! docker version >/dev/null 2>&1; then
+  echo "ERROR: Docker daemon is not reachable. Start Docker service/daemon first." >&2
+  exit 1
+fi
 
 echo "[1/2] Build Linux image..."
 docker buildx build --platform "${PLATFORM}" -t "${IMAGE_NAME}:${TAG}" --load .
 
 echo "[2/2] Save image to tar..."
 docker save -o "${OUTPUT_TAR}" "${IMAGE_NAME}:${TAG}"
+
+if [[ ! -f "${OUTPUT_TAR}" ]]; then
+  echo "ERROR: tar file was not created: ${OUTPUT_TAR}" >&2
+  exit 1
+fi
 
 echo
 echo "Done."
