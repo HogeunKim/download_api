@@ -4,8 +4,8 @@ set -euo pipefail
 # ---------------------------------------------
 # Ubuntu script: load Docker image tar and run container
 # Usage:
-#   chmod +x go-server-docker-run.sh
-#   ./go-server-docker-run.sh go-api-server_1.0.1.tar /home/genes007/api
+#   chmod +x run-docker-go-server.sh
+#   ./run-docker-go-server.sh go-api-server_1.0.1.tar /home/genes007/api
 #
 # Required argument:
 #   $1 : image tar file name/path (ex: go-api-server_1.0.1.tar)
@@ -25,12 +25,12 @@ USE_SUDO_DOCKER="${USE_SUDO_DOCKER:-false}"
 CONTAINER_NAME="go-api-server"
 
 if [[ -z "${IMAGE_TAR_INPUT}" ]]; then
-  echo "Usage: ./go-server-docker-run.sh <IMAGE_TAR> <HOST_OUTPUT_DIR>" >&2
+  echo "Usage: ./run-docker-go-server.sh <IMAGE_TAR> <HOST_OUTPUT_DIR>" >&2
   echo "[error] IMAGE_TAR argument is required. Example: go-api-server_1.0.1.tar" >&2
   exit 1
 fi
 if [[ -z "${HOST_OUTPUT_DIR_INPUT}" ]]; then
-  echo "Usage: ./go-server-docker-run.sh <IMAGE_TAR> <HOST_OUTPUT_DIR>" >&2
+  echo "Usage: ./run-docker-go-server.sh <IMAGE_TAR> <HOST_OUTPUT_DIR>" >&2
   echo "[error] HOST_OUTPUT_DIR argument is required. Example: /home/genes007/api" >&2
   exit 1
 fi
