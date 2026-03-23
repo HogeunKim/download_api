@@ -2,14 +2,14 @@
 setlocal
 
 REM Usage:
-REM   docker_export_win.bat [VERSION] [IMAGE_NAME] [PLATFORM]
+REM   make_docker_callback_server_win.bat [VERSION] [IMAGE_NAME] [PLATFORM]
 REM Example:
-REM   docker_export_win.bat 1.0.1 go-api-server linux/amd64
+REM   make_docker_callback_server_win.bat 1.0.1 callback-server linux/amd64
 
 set "SCRIPT_DIR=%~dp0"
 set "PS1_PATH=%SCRIPT_DIR%docker-build-export.ps1"
 set "GET_VERSION_PS1=%SCRIPT_DIR%get-app-version.ps1"
-set "VERSION_FILE=%SCRIPT_DIR%cmd\server\main.go"
+set "VERSION_FILE=%SCRIPT_DIR%cmd\callback-server\main.go"
 
 set "VERSION=%~1"
 if "%VERSION%"=="" (
@@ -21,12 +21,12 @@ if "%VERSION%"=="" (
 )
 if "%VERSION%"=="" (
   echo [ERROR] Failed to detect app version from "%VERSION_FILE%".
-  echo         Please pass version explicitly. Example: docker_export_win.bat 1.0.1
+  echo         Please pass version explicitly. Example: make_docker_callback_server_win.bat 1.0.1
   exit /b 1
 )
 
 set "IMAGE_NAME=%~2"
-if "%IMAGE_NAME%"=="" set "IMAGE_NAME=go-api-server"
+if "%IMAGE_NAME%"=="" set "IMAGE_NAME=callback-server"
 
 set "PLATFORM=%~3"
 if "%PLATFORM%"=="" set "PLATFORM=linux/amd64"
@@ -43,11 +43,12 @@ if not exist "%GET_VERSION_PS1%" (
 )
 
 echo ========================================
-echo Docker export batch (Windows)
+echo Docker export batch (Windows) - Callback server
 echo Image     : %IMAGE_NAME%:%VERSION%
 echo AppVersion: %VERSION%
 echo Platform  : %PLATFORM%
 echo OutputTar : %OUTPUT_TAR%
+echo Dockerfile: Dockerfile.callback
 echo ========================================
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1_PATH%" ^
@@ -55,7 +56,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1_PATH%" ^
   -Tag "%VERSION%" ^
   -Platform "%PLATFORM%" ^
   -OutputTar "%OUTPUT_TAR%" ^
-  -AppVersion "%VERSION%"
+  -AppVersion "%VERSION%" ^
+  -DockerfilePath "Dockerfile.callback"
 
 if errorlevel 1 (
   echo [ERROR] Docker export failed.

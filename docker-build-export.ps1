@@ -3,7 +3,8 @@ param(
     [string]$Tag = "latest",
     [string]$Platform = "linux/amd64",
     [string]$OutputTar = "",
-    [string]$AppVersion = ""
+    [string]$AppVersion = "",
+    [string]$DockerfilePath = "Dockerfile"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +26,7 @@ Write-Host "Image     : $ImageName`:$Tag"
 Write-Host "AppVersion: $AppVersion"
 Write-Host "Platform  : $Platform"
 Write-Host "Output tar: $OutputTar"
+Write-Host "Dockerfile: $DockerfilePath"
 Write-Host "========================================" -ForegroundColor Cyan
 
 docker version | Out-Null
@@ -33,7 +35,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[1/2] Build Linux image..." -ForegroundColor Green
-docker buildx build --platform $Platform --build-arg "APP_VERSION=$AppVersion" -t "$ImageName`:$Tag" --load .
+docker buildx build --platform $Platform -f "$DockerfilePath" --build-arg "APP_VERSION=$AppVersion" -t "$ImageName`:$Tag" --load .
 if ($LASTEXITCODE -ne 0) {
     throw "docker buildx build 실패"
 }
